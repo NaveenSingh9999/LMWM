@@ -65,6 +65,68 @@ FINGERPRINT_TIMEOUT = 15  # Seconds to wait for fingerprint
 # Termux:API fingerprint binary
 TERMUX_FINGERPRINT = "/data/data/com.termux/files/usr/bin/termux-fingerprint"
 
+# Boot detection marker
+BOOT_MARKER_FILE = CONFIG_DIR / ".boot_pending"
+BOOT_DELAY = 3  # Seconds to wait on boot before locking
+
+# ============================================================================
+# BOOT DETECTION
+# ============================================================================
+
+def is_boot_session() -> bool:
+    """
+    Detect if this is a Termux:Boot session.
+    Check for:
+    1. TERMUX_BOOT environment variable
+    2. Boot marker file (created by boot script)
+    3. Process parent is init/systemd (ppid = 1)
+    """
+    # Check environment variable set by Termux:Boot
+    if os.environ.get('TERMUX_BOOT') == '1':
+        return True
+    
+    # Check if boot marker exists and is recent (< 30 seconds old)
+    if BOOT_MARKER_FILE.exists():
+        try:
+            age = time.time() - BOOT_MARKER_FILE.stat().st_mtime
+            if age < 30:
+                return True
+            else:
+                BOOT_MARKER_FILE.unlink()  # Old marker, remove it
+        except:
+            pass
+    
+    # Check if parent process is init (ppid = 1 usually means boot)
+    try:
+        ppid = os.getppid()
+        if ppid == 1:
+            return True
+    except:
+        pass
+    
+    return False
+
+def create_boot_marker():
+    """Create marker file to indicate boot session."""
+    init_config_dir()
+    BOOT_MARKER_FILE.touch(mode=0o600)
+
+def should_skip_lock() -> bool:
+    """Determine if lock should be skipped in this context."""
+    # Skip if this is a boot session
+    if is_boot_session():
+        return True
+    
+    # Skip if stdin is not a TTY (e.g., running in background)
+    if not sys.stdin.isatty():
+        return True
+    
+    # Skip if LMSEC_SKIP environment variable is set
+    if os.environ.get('LMSEC_SKIP') == '1':
+        return True
+    
+    return False
+
 # ============================================================================
 # FINGERPRINT AUTHENTICATION
 # ============================================================================
@@ -888,14 +950,25 @@ def show_help():
     script = Path(__file__).name
     print(f"{UI.BOLD}Usage:{UI.RESET} python3 {script} [option]\n")
     print(f"{UI.BOLD}Options:{UI.RESET}")
-    print("  --setup     Configure password")
-    print("  --lock      Lock terminal")
-    print("  --status    Show status and logs")
-    print("  --remove    Remove LMSEC")
-    print("  --help      Show this help\n")
+    print("  --setup          Configure password")
+    print("  --lock           Lock terminal")
+    print("  --status         Show status and logs")
+    print("  --remove         Remove LMSEC")
+    print("  --boot-prepare   Mark boot session (for Termux:Boot)")
+    print("  --help           Show this help\n")
     
     print(f"{UI.BOLD}Bashrc Integration:{UI.RESET}")
     print(f"  python3 {Path(__file__).absolute()} --lock\n")
+    
+    print(f"{UI.BOLD}Termux:Boot Integration:{UI.RESET}")
+    print(f"  {UI.DIM}# In ~/.termux/boot/start-lmsec.sh:")
+    print(f"  export TERMUX_BOOT=1")
+    print(f"  python3 {Path(__file__).absolute()} --boot-prepare")
+    print(f"  # Your services here - won't be blocked by LMSEC")
+    print(f"  # Lock activates on new terminals after 30 seconds{UI.RESET}\n")
+    
+    print(f"{UI.BOLD}Skip Lock:{UI.RESET}")
+    print(f"  {UI.DIM}export LMSEC_SKIP=1  # Skip lock for current session{UI.RESET}\n")
     
     print(f"{UI.BOLD}Security Features:{UI.RESET}")
     print(f"  • Fingerprint authentication (Termux:API)")
@@ -906,6 +979,8 @@ def show_help():
     print(f"  • Signal blocking (SIGINT, SIGTSTP, SIGTERM, etc.)")
     print(f"  • Scrollback buffer clearing")
     print(f"  • Environment sanitization (no PATH attacks)")
+    print(f"  • Boot session detection (skips lock during boot)")
+
     print(f"  • TTY-aware session logging\n")
     
     print(f"{UI.BOLD}Fingerprint Setup:{UI.RESET}")
@@ -981,12 +1056,24 @@ def main():
         setup_password()
     elif arg in ('--lock', '-l'):
         config, _ = load_config_with_integrity()
-        if config.get('password_hash'):
-            lock_terminal()
+        if not config.get('password_hash'):
+            return  # No password configured, skip silently
+        
+        # Check if we should skip lock (boot session, no TTY, etc.)
+        if should_skip_lock():
+            # Just log and exit silently - don't block boot
+            log_access("Lock skipped (boot/background session)")
+            return
+        
+        lock_terminal()
     elif arg in ('--status', '-t'):
         show_status()
     elif arg in ('--remove', '-r'):
         remove_lock()
+    elif arg in ('--boot-prepare', '-b'):
+        # Special command for boot scripts to mark boot session
+        create_boot_marker()
+        print("Boot marker created. LMSEC will skip lock for 30 seconds.")
     elif arg in ('--help', '-h'):
         show_help()
     else:
