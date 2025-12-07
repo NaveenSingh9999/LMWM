@@ -1,6 +1,6 @@
 # LMSEC - Lamgerr Security Lock System
 
-![LMSEC Lock Screen](./assets/lmsec-lock-screen.png)
+![LMSEC Lock Screen](../assets/lmsec-lock-screen.png)
 
 A hardened terminal lock system for Termux with biometric authentication support. Built for developers who need to secure their workstations without compromising on speed or usability.
 
@@ -24,7 +24,7 @@ A hardened terminal lock system for Termux with biometric authentication support
 ```bash
 # Clone the repository
 git clone https://github.com/NaveenSingh9999/LMWM.git
-cd LMWM
+cd LMWM/LMSEC
 
 # Install Termux:API for fingerprint support (optional)
 pkg install termux-api
@@ -36,7 +36,7 @@ python3 LMSEC.py --setup
 python3 LMSEC.py --lock
 
 # Add to bashrc for auto-lock on terminal start
-echo 'python3 ~/LMWM/LMSEC.py --lock' >> ~/.bashrc
+echo 'python3 ~/LMWM/LMSEC/LMSEC.py --lock' >> ~/.bashrc
 ```
 
 ## Usage
